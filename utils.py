@@ -76,7 +76,7 @@ def makeBVFeature(PointCloud_, BoundaryCond, Discretization):
 
 
 def get_target(label_file, Tr, boundary, class_list):
-    """ Make target vector (x, y, w, l, im, re, prob) """
+    """ Make target vector (class, x, y, w, l, im, re) """
     target = np.zeros([50, 7], dtype = np.float32)
     minX = boundary['minX'] ; maxX = boundary['maxX']
     minY = boundary['minY'] ; maxY = boundary['maxY']
@@ -84,7 +84,7 @@ def get_target(label_file, Tr, boundary, class_list):
     
     with open(label_file, 'r') as f:
         lines = f.readlines() 
-    
+
     num_obj = len(lines)
     index = 0
     for j in range(num_obj):
@@ -97,14 +97,14 @@ def get_target(label_file, Tr, boundary, class_list):
             location_x = t_lidar[0][0]          
             location_y = t_lidar[0][1]            
             
-            if (location_x > minX) & (location_x < maxX) & (location_y > minY) & (location_y < maxY):
+            if (location_x > minX) and (location_x < maxX) and (location_y > minY) and (location_y < maxY):
                 
                 # Make sure target inside the covering area (0,1)
                 # x and y interchange?
-                target[index][2] = location_x / 40
+                target[index][2] = location_x / 40 # X is along height
                 
                 # Should put this in [0,1] ,so divide max_size 80 m
-                target[index][1] = (location_y+40)/80
+                target[index][1] = (location_y + 40)/80 # Y is along width
                 obj_width = obj[9].strip()
                 obj_length = obj[10].strip()
                 target[index][3] = float(obj_width) / 80
@@ -112,7 +112,8 @@ def get_target(label_file, Tr, boundary, class_list):
 
                 # Get target Observation angle of object, ranging [-pi .. pi]
                 obj_alpha = obj[3].strip()
-
+                assert target[index][1] <= 1 
+                assert target[index][2] <= 1
                 # Im axis
                 target[index][5] = math.sin(float(obj_alpha))
 
@@ -122,6 +123,7 @@ def get_target(label_file, Tr, boundary, class_list):
                     if obj_class == class_list[i]:
                         target[index][0] = i
                 index = index + 1
+    
     return target
 
 

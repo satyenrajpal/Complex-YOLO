@@ -2,7 +2,7 @@
     "class_list": ["Car", "Van" , "Truck" , "Pedestrian" , "Person_sitting" , "Cyclist" , "Tram"],
     "boundary": {
         "minX": 0,
-        "maxX": 80,
+        "maxX": 40,
         "minY": -40,
         "maxY": 40,
         "minZ": -2,

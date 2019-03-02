@@ -66,14 +66,17 @@ class Solver():
 		for epoch in range(self.epochs):
 			
 			for idx, data in enumerate(data_loader):
-				pdb.set_trace()
+				# pdb.set_trace()
 				rgb_map = data[0]
 				target = data[1]
+				
 				rgb_map = rgb_map.float().to(self.device)
 
 				output = self.model(rgb_map)
 				loss = region_loss(output, target)
 				loss.backward()
+				if idx%10:
+					print("Loss: {m:=5.4f}".format(m=loss.item()))
 				opt.step()		
 		
 
