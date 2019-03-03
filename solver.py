@@ -39,13 +39,13 @@ class Solver():
 		self.model = ComplexYOLO()
 		self.model.to(self.device)
 	
-	def buildDataset(self, toggle):
+	def buildDataset(self, phase):
 		self.dataset = KittiDataset(root_dir=self.data_dir,
 									class_list=self.class_list,
 									boundary=self.boundary,
 									split=self.split)
 		
-		if toggle=='val':
+		if phase=='val':
 			self.dataset.toggleVal()
 
 	def buildLogger(self):
@@ -55,16 +55,15 @@ class Solver():
 		self.buildDataset('train')
 
 		opt = optim.SGD(self.model.parameters(), 
-						lr =self.lr, 
-						momentum = self.momentum, 
-						weight_decay = self.weight_decay)
+						lr =self.lr)
+
 		region_loss = RegionLoss(num_classes = self.num_classes, num_anchors=self.num_anchors)
 		region_loss = region_loss.to(self.device)
 		# Dataloader
 		data_loader = DataLoader(self.dataset, self.batch_size, shuffle=True, pin_memory=False)
-		log_step = 100
+		log_step = 10
 		best_loss = 10000
-
+		self.model.train()	
 		for epoch in range(self.epochs):
 			running_loss = 0
 			running_nCorrect = 0
