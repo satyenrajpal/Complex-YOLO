@@ -244,16 +244,17 @@ def bbox_ious(boxes1, boxes2, x1y1x2y2 = True):
         h1 = boxes1[3]
         w2 = boxes2[2]
         h2 = boxes2[3]
-    uw = Mx - mx
-    uh = My - my
-    cw = w1 + w2 - uw
-    ch = h1 + h2 - uh
+    
+    uw = Mx - mx # Overall width
+    uh = My - My # Overall height
+    cw = w1 + w2 - uw # Intersection of width
+    ch = h1 + h2 - uh # Intersection of height
     mask = ((cw <= 0) + (ch <= 0) > 0)
-    area1 = w1 * h1
+    area1 = w1 * h1 
     area2 = w2 * h2
-    carea = cw * ch
-    carea[mask] = 0
-    uarea = area1 + area2 - carea
+    carea = cw * ch # Intersection of area
+    carea[mask] = 0 # Area=0 for those batches that are apart -> -ve intersection
+    uarea = area1 + area2 - carea # Union of area
     return carea / uarea
 
 

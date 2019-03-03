@@ -39,13 +39,13 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
     loss_iou = 0.0
 
     # Target: nB, 50, 7 -> class, x, y, w, l, im, re 
-
+    # Pred boxes.size =  nB*nA*nH*nW x 6
     for b in range(nB):
-        cur_pred_boxes = pred_boxes[b * nAnchors:(b + 1) * nAnchors].t() # 6, nB
+        cur_pred_boxes = pred_boxes[b * nAnchors:(b + 1) * nAnchors].t() # (nAnchors, 6)^T
         cur_ious = torch.zeros(nAnchors)
         
         for t in range(nTrueBox):
-            if target[b][t][1] == 0:
+            if target[b][t][1] == 0: # If x==0 # If there are no more objects
                 break
 
             # nW = 32, nH = 16
@@ -56,19 +56,21 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             gim = target[b][t][5]
             gre = target[b][t][6]
             cur_gt_boxes = torch.FloatTensor([gx, gy, gw, gl]).repeat(nAnchors, 1).t()
+            # Compute the max for all possible anchors. cur_ious.size() -> nAnchors
             cur_ious = torch.max(cur_ious, bbox_ious(cur_pred_boxes, cur_gt_boxes, x1y1x2y2 = False))
         
-        likely_boxes = torch.masked_select(cur_pred_boxes, (cur_ious > sil_thresh).byte().repeat(6, 1))
+        # Doubtful about this
+        # likely_boxes = torch.masked_select(cur_pred_boxes, (cur_ious > sil_thresh).byte().repeat(6, 1))
         
-        if likely_boxes.size() != torch.Size([0]):
-            likely_boxes = likely_boxes.view(6, -1)
-            all_combo = itertools.product(likely_boxes.transpose(0, 1), likely_boxes.transpose(0, 1))
-            for combo in all_combo:
-                loss_iou += bbox_iou(combo[0], combo[1], x1y1x2y2 = False)
-            loss_iou -= float(likely_boxes.shape[1])
+        # if likely_boxes.size() != torch.Size([0]):
+        #     likely_boxes = likely_boxes.view(6, -1)
+        #     all_combo = itertools.product(likely_boxes.transpose(0, 1), likely_boxes.transpose(0, 1))
+        #     for combo in all_combo:
+        #         loss_iou += bbox_iou(combo[0], combo[1], x1y1x2y2 = False)
+        #     loss_iou -= float(likely_boxes.shape[1])
 
         conf_mask = conf_mask.view(nB, nAnchors)
-        conf_mask[b][cur_ious > sil_thresh] = 0
+        conf_mask[b][cur_ious > sil_thresh] = 0 # All nAnchors <sil_thresh=no_object_scale
 
     nGT = 0
     nCorrect = 0
@@ -82,6 +84,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             best_iou = 0.0
             best_n = -1
             min_dist = 10000
+
             gx = target[b][t][1] * nW
             gy = target[b][t][2] * nH
             gi = int(gx)
@@ -90,13 +93,15 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             gl = target[b][t][4] * nH
             gim = target[b][t][5]
             gre = target[b][t][6]
-            gt_box = [0, 0, gw, gl] # Why 0,0?
+            gt_box = [0, 0, gw, gl]
             
+            # Find best bounding box -> highest IOU
             for n in range(nA):
                 aw = anchors[int(anchor_step * n)]
                 ah = anchors[int(anchor_step * n + 1)]
                 anchor_box = [0, 0, aw, ah]
                 iou  = bbox_iou(anchor_box, gt_box, x1y1x2y2 = False)
+
                 if anchor_step == 4:
                     ax = anchors[anchor_step * n + 2]
                     ay = anchors[anchor_step * n + 3]
@@ -113,12 +118,11 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             pred_box = [pred_boxes[index][0], pred_boxes[index][1], pred_boxes[index][2], pred_boxes[index][3]]
             # pdb.set_trace()
             
-            gt_box = [gx, gy, gw, gl]
-            coord_mask[b][best_n][gj][gi] = 1 # problem
+            coord_mask[b][best_n][gj][gi] = 1 
             cls_mask[b][best_n][gj][gi] = 1
             conf_mask = conf_mask.view(nB, nA, nH, nW)
-            
             conf_mask[b][best_n][gj][gi] = object_scale
+
             tx[b][best_n][gj][gi] = target[b][t][1] * nW - gi
             ty[b][best_n][gj][gi] = target[b][t][2] * nH - gj
             tw[b][best_n][gj][gi] = np.log(gw / anchors[int(anchor_step * best_n)])
@@ -126,14 +130,16 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             tim[b][best_n][gj][gi] = target[b][t][5]
             tre[b][best_n][gj][gi] = target[b][t][6]
             
+            gt_box = [gx, gy, gw, gl]
             iou = bbox_iou(gt_box, pred_box, x1y1x2y2 = False)
             tconf[b][best_n][gj][gi] = iou
             tcls[b][best_n][gj][gi] = target[b][t][0]
+            
             if iou > 0.5:
                 nCorrect = nCorrect + 1
     
     conf_mask = conf_mask.view(nB, nA, nH, nW)
-    return nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, tl, tim, tre, tconf, tcls, loss_iou
+    return nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, tl, tim, tre, tconf, tcls
 
 
 class RegionLoss(nn.Module):
@@ -155,6 +161,9 @@ class RegionLoss(nn.Module):
         # TODO: Change to '.device'
         # output: B x As * (6 + 1 + num_classes) * H * W
         # import pdb;pdb.set_trace()
+
+        # Create separate function for predicted boxes
+        ###########################################################
         t0 = time.time()
         
         nB = output.data.size(0)  # Batch Size
@@ -199,11 +208,12 @@ class RegionLoss(nn.Module):
         pred_boxes[3] = torch.exp(l.data).view(nB * nA * nH * nW).cuda() * anchor_l
         pred_boxes[4] = im.data.view(nB * nA * nH * nW).cuda()
         pred_boxes[5] = re.data.view(nB * nA * nH * nW).cuda()
-        pred_boxes = convert2cpu(pred_boxes.transpose(0, 1).contiguous().view(-1, 6))
+        pred_boxes = convert2cpu(pred_boxes.transpose(0, 1).contiguous().view(-1, 6)) # Why?
+        ###########################################################
         t2 = time.time()
 
         # Problem here
-        nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, tl, tim, tre, tconf,tcls, loss_iou = \
+        nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, tl, tim, tre, tconf,tcls = \
         build_targets(pred_boxes, target.data, self.anchors, nA, nC, \
         nH, nW, self.noobject_scale, self.object_scale, self.thresh)
         
@@ -218,7 +228,7 @@ class RegionLoss(nn.Module):
         tre   = Variable(tre.cuda())
         tconf = Variable(tconf.cuda())
         cls_mask = cls_mask.view(nB * nA * nH * nW)
-        tcls  = Variable(tcls.view(-1)[cls_mask].long().cuda())
+        tcls  = Variable(tcls.view(-1)[cls_mask].long().cuda()) # Selects only those indices where cls_mask==1
 
         coord_mask = Variable(coord_mask.cuda())
         conf_mask  = Variable(conf_mask.cuda())
@@ -230,13 +240,14 @@ class RegionLoss(nn.Module):
         loss_y = self.coord_scale * nn.MSELoss(reduction = 'sum')(y * coord_mask, ty * coord_mask)
         loss_w = self.coord_scale * nn.MSELoss(reduction = 'sum')(w * coord_mask, tw * coord_mask)
         loss_l = self.coord_scale * nn.MSELoss(reduction = 'sum')(l * coord_mask, tl * coord_mask)
-        loss_im = self.coord_scale * nn.MSELoss(reduction = 'sum')(im * coord_mask, tim * coord_mask)
-        loss_re = self.coord_scale * nn.MSELoss(reduction = 'sum')(re * coord_mask, tre * coord_mask)
-        loss_Euler = loss_im + loss_re
         loss_conf = nn.MSELoss(reduction = 'sum')(conf * conf_mask, tconf * conf_mask)
         loss_cls = self.class_scale * nn.CrossEntropyLoss(reduction = 'sum')(cls_prob, tcls)
         
-        loss = loss_x + loss_y + loss_w + loss_l + loss_conf + loss_cls + loss_Euler + torch.tensor(loss_iou).cuda()
+        loss_im = self.coord_scale * nn.MSELoss(reduction = 'sum')(im * coord_mask, tim * coord_mask)
+        loss_re = self.coord_scale * nn.MSELoss(reduction = 'sum')(re * coord_mask, tre * coord_mask)
+        loss_Euler = loss_im + loss_re
+        
+        loss = loss_x + loss_y + loss_w + loss_l + loss_conf + loss_cls + loss_Euler
         # loss_history[epoch, batch_idx, :] = [loss_x, loss_y, loss_w, loss_l, loss_conf, loss_cls, loss_Euler, loss_iou]
         
         # t4 = time.time()
@@ -248,4 +259,4 @@ class RegionLoss(nn.Module):
             print('       create loss : %f' % (t4 - t3))
             print('             total : %f' % (t4 - t0))
         # logging.info('nGT %d, recall %d, proposals %d, loss: x %f, y %f, w %f, h %f, conf %f, cls %f, Euler %f, total %f' % (nGT, nCorrect, nProposals, loss_x.data, loss_y.data, loss_w.data, loss_l.data, loss_conf.data, loss_cls.data, loss_Euler.data, loss.data))
-        return loss
+        return loss, nCorrect, nGT

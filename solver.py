@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
-
+import os
 from model import ComplexYOLO
 from kitti import KittiDataset
 from region_loss import RegionLoss
@@ -12,16 +12,16 @@ import json
 
 
 class Solver():
-	def __init__(self, config):
-		self.data_dir = config.data_dir
-		self.log = config.do_log
-		self.split=config.split
+	def __init__(self, args):
+		self.data_dir = args.data_dir
+		self.log = args.do_log
+		self.split=args.split
 		
-		self.epochs = config.epochs
-		self.batch_size=config.batch_size
-		self.lr = config.lr
-		self.momentum = config.momentum
-		self.weight_decay = config.weight_decay
+		self.epochs = args.epochs
+		self.batch_size=args.batch_size
+		self.lr = args.lr
+		self.momentum = args.momentum
+		self.weight_decay = args.weight_decay
 		
 		with open('config.json', 'r') as f:
 			config = json.load(f)
@@ -31,7 +31,7 @@ class Solver():
 		self.anchors = config["anchors"]
 		self.num_anchors = len(self.anchors)//2
 		self.num_classes = len(self.class_list) + 1
-
+		self.save_dir = args.save_dir
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 		self.buildModel()
 
@@ -62,9 +62,14 @@ class Solver():
 		region_loss = region_loss.to(self.device)
 		# Dataloader
 		data_loader = DataLoader(self.dataset, self.batch_size, shuffle=True, pin_memory=False)
-		
+		log_step = 100
+		best_loss = 10000
+
 		for epoch in range(self.epochs):
-			
+			running_loss = 0
+			running_nCorrect = 0
+			running_nGT = 0
+
 			for idx, data in enumerate(data_loader):
 				# pdb.set_trace()
 				rgb_map = data[0]
@@ -73,10 +78,26 @@ class Solver():
 				rgb_map = rgb_map.float().to(self.device)
 
 				output = self.model(rgb_map)
-				loss = region_loss(output, target)
+				loss, nCorrect, nGT = region_loss(output, target)
 				loss.backward()
-				if idx%10:
-					print("Loss: {m:=5.4f}".format(m=loss.item()))
+				running_loss+=loss.item()
+				running_nCorrect+=nGT
+				running_nCorrect+=nCorrect
+
+				if idx % log_step==0:
+					mean_loss = running_loss/log_step
+					print("Epoch: {}, Loss: {m:=5.4f}".format(epoch, m=mean_loss))
+					print("nCorrect = {m:=5.4f}, nGT = {p:=5.4f}".format(m=running_nCorrect/log_step, 
+																		 p=running_nGT/log_step))
+					if mean_loss<best_loss:
+						best_loss = mean_loss
+						path = os.path.join(self.save_dir, 'ep-{}-{m:=5.4f}.pth'.format(epoch, m=mean_loss))
+						torch.save(self.model.state_dict(), path)
+						print("Saved model for {} epoch\n".format(epoch))
+					
+					running_loss = 0
+					running_nCorrect = 0
+					running_nGT = 0
 				opt.step()		
 		
 
